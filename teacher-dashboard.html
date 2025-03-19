@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>교사용 대시보드</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- 엑셀 다운로드를 위한 라이브러리 추가 -->
+    <script src="https://unpkg.com/xlsx/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+    <div class="container mt-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h2>교사용 대시보드</h2>
+            <div class="d-flex align-items-center">
+                <div class="me-3">
+                    <label class="form-label">시작일:</label>
+                    <input type="date" class="form-control" id="startDate">
+                </div>
+                <div class="me-3">
+                    <label class="form-label">종료일:</label>
+                    <input type="date" class="form-control" id="endDate">
+                </div>
+                <div>
+                    <button class="btn btn-success me-2" onclick="downloadExcel()">
+                        엑셀 다운로드
+                    </button>
+                    <button class="btn btn-danger" onclick="clearData()">
+                        데이터 초기화
+                    </button>
+                </div>
+            </div>
+        </div>
+        <p id="currentDate" class="text-muted"></p>
+
+        <!-- 오늘의 통계 -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">체크인 현황</h5>
+                        <p class="card-text" id="checkinCount">로딩중...</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">오늘의 감정 통계</h5>
+                        <canvas id="moodChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 상담 신청 목록 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">상담 신청 현황</h5>
+            </div>
+            <div class="card-body">
+                <div id="counselingList"></div>
+            </div>
+        </div>
+
+        <!-- 전체 체크인 목록 -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">오늘의 체크인 목록</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>학번</th>
+                                <th>이름</th>
+                                <th>어제 공부한 내용</th>
+                                <th>감정상태</th>
+                                <th>어제 목표 달성</th>
+                                <th>오늘의 목표</th>
+                                <th>시간</th>
+                            </tr>
+                        </thead>
+                        <tbody id="checkinList"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 통계 필터 영역 추가 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">데이터 필터</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3">
+                        <label class="form-label">학생 선택</label>
+                        <select class="form-select" id="studentFilter">
+                            <option value="">전체 학생</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">감정 상태</label>
+                        <select class="form-select" id="moodFilter">
+                            <option value="">전체</option>
+                            <option value="negative">부정적 감정 (매우나쁨, 나쁨)</option>
+                            <option value="neutral">보통</option>
+                            <option value="positive">긍정적 감정 (좋음, 매우좋음)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">상담 요청</label>
+                        <select class="form-select" id="counselingFilter">
+                            <option value="">전체</option>
+                            <option value="true">상담 요청만</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">정렬 기준</label>
+                        <select class="form-select" id="sortFilter">
+                            <option value="date-desc">최신순</option>
+                            <option value="date-asc">오래된순</option>
+                            <option value="mood-asc">감정 낮은순</option>
+                            <option value="mood-desc">감정 높은순</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 학생별 감정 변화 그래프 -->
+        <div class="card mb-4" id="studentStatsCard" style="display: none;">
+            <div class="card-header">
+                <h5 class="mb-0">학생별 감정 변화 추이</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="studentMoodChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 위험 신호 알림 영역 -->
+        <div id="warningAlert" class="alert alert-danger" style="display: none;">
+            <h5>⚠️ 주의 필요 학생</h5>
+            <div id="warningList"></div>
+        </div>
+    </div>
+
+    <script>
+        // 현재 날짜 표시
+        document.getElementById('currentDate').textContent = 
+            new Date().toLocaleDateString('ko-KR', { 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric', 
+                weekday: 'long' 
+            });
+
+        // localStorage에서 데이터 가져오기
+        function getCheckinData() {
+            return JSON.parse(localStorage.getItem('checkinData') || '[]');
+        }
+
+        // 오늘 날짜의 데이터만 필터링
+        function getTodayData() {
+            const today = new Date().toISOString().split('T')[0];
+            return getCheckinData().filter(data => 
+                data.timestamp.startsWith(today)
+            );
+        }
+
+        // 감정 통계 차트 생성
+        function createMoodChart(data) {
+            const moodCounts = [0, 0, 0, 0, 0];
+            
+            data.forEach(item => {
+                moodCounts[item.mood - 1]++;
+            });
+
+            const ctx = document.getElementById('moodChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['매우나쁨', '나쁨', '보통', '좋음', '매우좋음'],
+                    datasets: [{
+                        label: '감정 상태',
+                        data: moodCounts,
+                        backgroundColor: [
+                            '#ff6b6b',  // 매우나쁨 - 빨간색
+                            '#ffd93d',  // 나쁨 - 노란색
+                            '#6c757d',  // 보통 - 회색
+                            '#4dabf7',  // 좋음 - 파란색
+                            '#51cf66'   // 매우좋음 - 초록색
+                        ]
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                stepSize: 1
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // 상담 신청 목록 표시
+        function displayCounselingRequests(data) {
+            const counselingList = document.getElementById('counselingList');
+            const counselingRequests = data.filter(item => 
+                item.counselingRequest
+            );
+
+            if (counselingRequests.length === 0) {
+                counselingList.innerHTML = '<p class="text-muted">오늘의 상담 신청이 없습니다.</p>';
+                return;
+            }
+
+            const html = counselingRequests.map(item => `
+                <div class="alert alert-info">
+                    <h6>${item.studentName} (${item.studentId})</h6>
+                    <p class="mb-0">${item.message || '메시지 없음'}</p>
+                </div>
+            `).join('');
+
+            counselingList.innerHTML = html;
+        }
+
+        // 체크인 목록 표시
+        function displayCheckinList(data) {
+            const checkinList = document.getElementById('checkinList');
+            const moodEmojis = ['😢', '😔', '😐', '🙂', '😊'];
+
+            const html = data.map(item => `
+                <tr>
+                    <td>${item.studentId}</td>
+                    <td>${item.studentName}</td>
+                    <td>${item.studyRecord}</td>
+                    <td>${moodEmojis[item.mood - 1]}</td>
+                    <td>
+                        ${item.yesterdayGoalAchieved === 'true' 
+                            ? '<span class="text-success">✅ 달성</span>' 
+                            : '<span class="text-danger">❌ 미달성</span>'}
+                    </td>
+                    <td>${item.todayGoal}</td>
+                    <td>${new Date(item.timestamp).toLocaleTimeString()}</td>
+                </tr>
+            `).join('');
+
+            checkinList.innerHTML = html;
+            
+            // 체크인 수 업데이트
+            document.getElementById('checkinCount').textContent = 
+                `${data.length}명 체크인 완료`;
+        }
+
+        // 페이지 로드시 실행
+        createMoodChart(getTodayData());
+        displayCounselingRequests(getTodayData());
+        displayCheckinList(getTodayData());
+
+        // 1분마다 데이터 새로고침
+        setInterval(() => {
+            createMoodChart(getTodayData());
+            displayCounselingRequests(getTodayData());
+            displayCheckinList(getTodayData());
+        }, 60000);
+
+        // 페이지 로드시 날짜 입력 필드 초기화
+        document.addEventListener('DOMContentLoaded', () => {
+            const today = new Date().toISOString().split('T')[0];
+            const oneMonthAgo = new Date();
+            oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+            
+            document.getElementById('startDate').value = oneMonthAgo.toISOString().split('T')[0];
+            document.getElementById('startDate').max = today;
+            
+            document.getElementById('endDate').value = today;
+            document.getElementById('endDate').max = today;
+        });
+
+        // 날짜 범위에 해당하는 데이터 가져오기
+        function getDataByDateRange(startDate, endDate) {
+            const data = getCheckinData();
+            return data.filter(item => {
+                const itemDate = item.timestamp.split('T')[0];
+                return itemDate >= startDate && itemDate <= endDate;
+            });
+        }
+
+        // 엑셀 다운로드 함수 수정
+        function downloadExcel() {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+
+            if (!startDate || !endDate) {
+                alert('시작일과 종료일을 선택해주세요.');
+                return;
+            }
+
+            const data = getDataByDateRange(startDate, endDate);
+            
+            if (data.length === 0) {
+                alert('선택한 기간에 데이터가 없습니다.');
+                return;
+            }
+
+            // 엑셀 데이터 형식 변환
+            const excelData = data.map(item => ({
+                '날짜': new Date(item.timestamp).toLocaleDateString(),
+                '시간': new Date(item.timestamp).toLocaleTimeString(),
+                '학번': item.studentId,
+                '이름': item.studentName,
+                '어제 공부한 내용': item.studyRecord,
+                '감정상태': ['매우나쁨', '나쁨', '보통', '좋음', '매우좋음'][item.mood - 1],
+                '어제 목표 달성': item.yesterdayGoalAchieved === 'true' ? '달성' : '미달성',
+                '오늘의 목표': item.todayGoal,
+                '상담요청': item.counselingRequest ? '예' : '아니오',
+                '상담내용': item.message || ''
+            }));
+
+            // 엑셀 워크북 생성
+            const ws = XLSX.utils.json_to_sheet(excelData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "체크인데이터");
+
+            // 열 너비 자동 조정
+            const maxWidth = excelData.reduce((acc, row) => {
+                Object.keys(row).forEach(key => {
+                    const length = (row[key] || '').toString().length;
+                    acc[key] = Math.max(acc[key] || 0, length);
+                });
+                return acc;
+            }, {});
+
+            ws['!cols'] = Object.keys(maxWidth).map(key => ({
+                wch: Math.min(maxWidth[key] + 2, 50) // 최대 50자로 제한
+            }));
+
+            // 파일명에 날짜 범위 포함
+            const fileName = `체크인_데이터_${startDate}_${endDate}.xlsx`;
+            XLSX.writeFile(wb, fileName);
+        }
+
+        // 날짜 입력 필드 이벤트 리스너
+        document.getElementById('startDate').addEventListener('change', function() {
+            document.getElementById('endDate').min = this.value;
+        });
+
+        document.getElementById('endDate').addEventListener('change', function() {
+            document.getElementById('startDate').max = this.value;
+        });
+
+        // 데이터 초기화 함수
+        function clearData() {
+            if (confirm('정말 모든 데이터를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.')) {
+                // 데이터 삭제 전 백업 파일 다운로드
+                downloadExcel();
+                
+                // localStorage 데이터 삭제
+                localStorage.removeItem('checkinData');
+                
+                // 화면 새로고침
+                alert('모든 데이터가 삭제되었습니다.\n백업 파일이 다운로드되었습니다.');
+                location.reload();
+            }
+        }
+
+        // 데이터 필터링 기능 추가
+        function addDateFilter() {
+            const today = new Date().toISOString().split('T')[0];
+            const filterHtml = `
+                <div class="mb-3">
+                    <label class="form-label">날짜 선택:</label>
+                    <input type="date" class="form-control" id="dateFilter" 
+                           value="${today}" max="${today}">
+                </div>
+            `;
+
+            document.querySelector('.container').insertAdjacentHTML('afterbegin', filterHtml);
+
+            // 날짜 필터 이벤트 리스너
+            document.getElementById('dateFilter').addEventListener('change', (e) => {
+                const selectedDate = e.target.value;
+                const filteredData = getCheckinData().filter(data => 
+                    data.timestamp.startsWith(selectedDate)
+                );
+                updateDashboard(filteredData);
+            });
+        }
+
+        // 대시보드 업데이트 함수
+        function updateDashboard(data) {
+            // 기존 차트 제거
+            const chartElement = document.getElementById('moodChart');
+            if (chartElement) {
+                chartElement.remove();
+                const newCanvas = document.createElement('canvas');
+                newCanvas.id = 'moodChart';
+                document.querySelector('.card-body').appendChild(newCanvas);
+            }
+
+            // 데이터로 대시보드 업데이트
+            createMoodChart(data);
+            displayCounselingRequests(data);
+            displayCheckinList(data);
+        }
+
+        // 페이지 로드시 필터 추가
+        addDateFilter();
+
+        // 학생별 통계 및 그래프 관련 함수
+        function initializeStudentFilter() {
+            const data = getCheckinData();
+            const students = [...new Set(data.map(item => 
+                JSON.stringify({id: item.studentId, name: item.studentName})
+            ))].map(str => JSON.parse(str));
+
+            const select = document.getElementById('studentFilter');
+            students.forEach(student => {
+                const option = document.createElement('option');
+                option.value = student.id;
+                option.textContent = `${student.name} (${student.id})`;
+                select.appendChild(option);
+            });
+        }
+
+        function showStudentStats(studentId) {
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const data = getDataByDateRange(startDate, endDate);
+            const studentData = data.filter(item => item.studentId === studentId);
+
+            if (studentData.length === 0) {
+                alert('선택한 기간에 데이터가 없습니다.');
+                return;
+            }
+
+            // 감정 변화 추이 그래프
+            const moodTrend = studentData.map(item => ({
+                date: new Date(item.timestamp).toLocaleDateString(),
+                mood: item.mood,
+                counseling: item.counselingRequest
+            }));
+
+            const ctx = document.getElementById('studentMoodChart').getContext('2d');
+            if (window.studentChart) {
+                window.studentChart.destroy();
+            }
+
+            window.studentChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: moodTrend.map(item => item.date),
+                    datasets: [{
+                        label: '감정 상태',
+                        data: moodTrend.map(item => item.mood),
+                        borderColor: '#4dabf7',
+                        backgroundColor: moodTrend.map(item => 
+                            item.counseling ? 'rgba(255, 0, 0, 0.2)' : 'transparent'
+                        ),
+                        pointStyle: moodTrend.map(item => 
+                            item.counseling ? 'star' : 'circle'
+                        ),
+                        pointRadius: moodTrend.map(item => 
+                            item.counseling ? 8 : 5
+                        )
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            min: 1,
+                            max: 5,
+                            ticks: {
+                                stepSize: 1,
+                                callback: function(value) {
+                                    return ['매우나쁨', '나쁨', '보통', '좋음', '매우좋음'][value-1];
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const item = moodTrend[context.dataIndex];
+                                    let label = ['매우나쁨', '나쁨', '보통', '좋음', '매우좋음'][item.mood-1];
+                                    if (item.counseling) {
+                                        label += ' (상담요청)';
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            document.getElementById('studentStatsCard').style.display = 'block';
+        }
+
+        // 위험 신호 감지 함수
+        function checkWarningSignals() {
+            const data = getCheckinData();
+            const today = new Date().toISOString().split('T')[0];
+            const warningList = [];
+
+            // 학생별로 최근 데이터 분석
+            const studentGroups = {};
+            data.forEach(item => {
+                const date = item.timestamp.split('T')[0];
+                if (!studentGroups[item.studentId]) {
+                    studentGroups[item.studentId] = [];
+                }
+                studentGroups[item.studentId].push({
+                    date,
+                    mood: item.mood,
+                    name: item.studentName
+                });
+            });
+
+            // 3일 연속 매우 나쁨 감정 체크
+            Object.entries(studentGroups).forEach(([studentId, checks]) => {
+                // 최근 3일 데이터만 필터링
+                const recentChecks = checks
+                    .filter(check => {
+                        const checkDate = new Date(check.date);
+                        const threeDaysAgo = new Date();
+                        threeDaysAgo.setDate(threeDaysAgo.getDate() - 2);
+                        return checkDate >= threeDaysAgo;
+                    })
+                    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+                if (recentChecks.length >= 3 && 
+                    recentChecks.every(check => check.mood === 1)) {
+                    warningList.push({
+                        studentId,
+                        studentName: recentChecks[0].name,
+                        days: recentChecks.length
+                    });
+                }
+            });
+
+            // 경고 표시
+            const warningAlert = document.getElementById('warningAlert');
+            const warningListElement = document.getElementById('warningList');
+            
+            if (warningList.length > 0) {
+                warningListElement.innerHTML = warningList.map(warning => `
+                    <div class="mb-2">
+                        <strong>${warning.studentName}</strong> 학생이 
+                        최근 ${warning.days}일 연속 매우 나쁨 감정을 보이고 있습니다.
+                    </div>
+                `).join('');
+                warningAlert.style.display = 'block';
+            } else {
+                warningAlert.style.display = 'none';
+            }
+        }
+
+        // 필터 적용 함수
+        function applyFilters() {
+            const studentId = document.getElementById('studentFilter').value;
+            const moodFilter = document.getElementById('moodFilter').value;
+            const counselingFilter = document.getElementById('counselingFilter').value;
+            const sortFilter = document.getElementById('sortFilter').value;
+
+            let filteredData = getDataByDateRange(
+                document.getElementById('startDate').value,
+                document.getElementById('endDate').value
+            );
+
+            // 학생 필터
+            if (studentId) {
+                filteredData = filteredData.filter(item => item.studentId === studentId);
+            }
+
+            // 감정 필터
+            if (moodFilter) {
+                switch(moodFilter) {
+                    case 'negative':
+                        filteredData = filteredData.filter(item => item.mood <= 2);
+                        break;
+                    case 'neutral':
+                        filteredData = filteredData.filter(item => item.mood === 3);
+                        break;
+                    case 'positive':
+                        filteredData = filteredData.filter(item => item.mood >= 4);
+                        break;
+                }
+            }
+
+            // 상담 요청 필터
+            if (counselingFilter === 'true') {
+                filteredData = filteredData.filter(item => item.counselingRequest);
+            }
+
+            // 정렬
+            switch(sortFilter) {
+                case 'date-desc':
+                    filteredData.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                    break;
+                case 'date-asc':
+                    filteredData.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                    break;
+                case 'mood-desc':
+                    filteredData.sort((a, b) => b.mood - a.mood);
+                    break;
+                case 'mood-asc':
+                    filteredData.sort((a, b) => a.mood - b.mood);
+                    break;
+            }
+
+            // 데이터 표시 업데이트
+            updateDashboard(filteredData);
+        }
+
+        // 이벤트 리스너 설정
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeStudentFilter();
+            
+            // 필터 변경 이벤트
+            ['studentFilter', 'moodFilter', 'counselingFilter', 'sortFilter'].forEach(id => {
+                document.getElementById(id).addEventListener('change', applyFilters);
+            });
+
+            // 학생 선택시 통계 표시
+            document.getElementById('studentFilter').addEventListener('change', function() {
+                if (this.value) {
+                    showStudentStats(this.value);
+                } else {
+                    document.getElementById('studentStatsCard').style.display = 'none';
+                }
+            });
+
+            // 위험 신호 주기적 체크 (1시간마다)
+            checkWarningSignals();
+            setInterval(checkWarningSignals, 3600000);
+        });
+    </script>
+
+    <style>
+        /* 테이블 스타일 추가 */
+        .table td {
+            vertical-align: middle;
+        }
+        
+        .table td:nth-child(3),
+        .table td:nth-child(6) {
+            max-width: 200px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+    </style>
+</body>
+</html> 
